@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PixelMap 100×100</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #111827;
+    color: #fff;
+    overflow: hidden;
+  }
+  header {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    background: #1f2937;
+    border-bottom: 1px solid #374151;
+    position: relative;
+    z-index: 5;
+  }
+  h1 { margin: 0; font-size: 19px; }
+  .sub { color: #9ca3af; font-size: 12px; margin-top: 3px; }
+  .stats { text-align: right; font-size: 13px; }
+  .stats b { color: #60a5fa; }
+  #viewport {
+    position: absolute;
+    top: 64px; bottom: 0; left: 0; right: 0;
+    overflow: hidden;
+    touch-action: none;
+    background: #0b1020;
+  }
+  #world {
+    position: absolute;
+    width: 1000px;
+    height: 1000px;
+    transform-origin: 0 0;
+    background:
+      linear-gradient(#263244 1px, transparent 1px),
+      linear-gradient(90deg, #263244 1px, transparent 1px);
+    background-size: 10px 10px;
+    image-rendering: pixelated;
+    border: 2px solid #4b5563;
+  }
+  .pixel {
+    position: absolute;
+    width: 10px; height: 10px;
+    border: 0.5px solid rgba(255,255,255,.08);
+    padding: 0;
+    margin: 0;
+    background: #182235;
+    cursor: pointer;
+  }
+  .pixel:hover { outline: 1px solid white; z-index: 2; }
+  .pixel.sold { background: #ef4444; }
+  .pixel.mine { background: #22c55e; }
+  #hint {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    background: rgba(17,24,39,.92);
+    padding: 9px 13px;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #d1d5db;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #panel {
+    position: absolute;
+    right: 14px;
+    top: 78px;
+    width: min(290px, calc(100% - 28px));
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 14px;
+    padding: 14px;
+    z-index: 10;
+    display: none;
+    box-shadow: 0 15px 40px rgba(0,0,0,.35);
+  }
+  #panel h2 { font-size: 17px; margin: 0 0 8px; }
+  #panel p { margin: 6px 0; color: #cbd5e1; font-size: 13px; }
+  button.action {
+    width: 100%;
+    border: 0;
+    border-radius: 9px;
+    padding: 11px;
+    margin-top: 9px;
+    background: #3b82f6;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+  }
+  button.close { background: #374151; }
+  #controls {
+    position: absolute;
+    left: 14px;
+    top: 78px;
+    z-index: 8;
+    display: flex;
+    gap: 7px;
+  }
+  #controls button {
+    width: 40px; height: 40px;
+    border: 1px solid #4b5563;
+    border-radius: 10px;
+    background: rgba(31,41,55,.95);
+    color: white;
+    font-size: 19px;
+  }
+  #toast {
+    position: fixed;
+    left: 50%;
+    top: 78px;
+    transform: translateX(-50%);
+    background: #22c55e;
+    color: #052e16;
+    font-weight: bold;
+    padding: 10px 14px;
+    border-radius: 10px;
+    display: none;
+    z-index: 20;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🟦 PixelMap</h1>
+    <div class="sub">Carte 100 × 100 • 1 pixel = 1 €</div>
+  </div>
+  <div class="stats">Disponibles : <b id="available">10 000</b><br>Vendus : <b id="soldCount">0</b></div>
+</header>
+
+<div id="viewport">
+  <div id="world"></div>
+  <div id="controls">
+    <button id="zoomIn">+</button>
+    <button id="zoomOut">−</button>
+    <button id="reset">⌂</button>
+  </div>
+  <div id="hint">🔍 Pince à deux doigts pour zoomer • Fais glisser pour déplacer</div>
+</div>
+
+<div id="panel">
+  <h2 id="pixelTitle">Pixel #1</h2>
+  <p>Position : <span id="pixelPos"></span></p>
+  <p>Prix : <strong>1,00 €</strong></p>
+  <p id="status">Disponible</p>
+  <button class="action" id="buy">Acheter ce pixel</button>
+  <button class="action close" id="close">Fermer</button>
+</div>
+
+<div id="toast">Pixel acheté ! (démo)</div>
+
+<script>
+const world = document.getElementById('world');
+const viewport = document.getElementById('viewport');
+const panel = document.getElementById('panel');
+const available = document.getElementById('available');
+const soldCount = document.getElementById('soldCount');
+const sold = new Set();
+let selected = null;
+
+for (let y = 0; y < 100; y++) {
+  for (let x = 0; x < 100; x++) {
+    const b = document.createElement('button');
+    b.className = 'pixel';
+    b.dataset.x = x;
+    b.dataset.y = y;
+    b.title = `Pixel ${x+1}, ${y+1}`;
+    b.style.left = (x * 10) + 'px';
+    b.style.top = (y * 10) + 'px';
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      selected = {x, y, el:b, key:x+','+y};
+      document.getElementById('pixelTitle').textContent = `Pixel #${y*100+x+1}`;
+      document.getElementById('pixelPos').textContent = `${x+1} × ${y+1}`;
+      const isSold = sold.has(selected.key);
+      document.getElementById('status').textContent = isSold ? '🔴 Déjà vendu' : '🟢 Disponible';
+      document.getElementById('buy').style.display = isSold ? 'none' : 'block';
+      panel.style.display = 'block';
+    });
+    world.appendChild(b);
+  }
+}
+
+document.getElementById('buy').onclick = () => {
+  if (!selected || sold.has(selected.key)) return;
+  sold.add(selected.key);
+  selected.el.classList.add('sold');
+  available.textContent = (10000 - sold.size).toLocaleString('fr-FR');
+  soldCount.textContent = sold.size;
+  document.getElementById('status').textContent = '🔴 Vendu (démo)';
+  document.getElementById('buy').style.display = 'none';
+  const toast = document.getElementById('toast');
+  toast.style.display = 'block';
+  setTimeout(() => toast.style.display = 'none', 1400);
+};
+document.getElementById('close').onclick = () => panel.style.display = 'none';
+
+let scale = 0.65, tx = 0, ty = 0;
+function render() { world.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; }
+function center() {
+  tx = (viewport.clientWidth - 1000*scale)/2;
+  ty = (viewport.clientHeight - 1000*scale)/2;
+  render();
+}
+document.getElementById('zoomIn').onclick = () => zoomAt(1.25, viewport.clientWidth/2, viewport.clientHeight/2);
+document.getElementById('zoomOut').onclick = () => zoomAt(.8, viewport.clientWidth/2, viewport.clientHeight/2);
+document.getElementById('reset').onclick = () => { scale=.65; center(); };
+
+function zoomAt(f, cx, cy) {
+  const old = scale;
+  scale = Math.max(.2, Math.min(8, scale*f));
+  tx = cx - (cx-tx) * (scale/old);
+  ty = cy - (cy-ty) * (scale/old);
+  render();
+}
+
+let dragging=false, lastX=0, lastY=0;
+viewport.addEventListener('pointerdown', e => {
+  if (e.target.closest('.pixel') || e.target.closest('#panel') || e.target.closest('#controls')) return;
+  dragging=true; lastX=e.clientX; lastY=e.clientY;
+  viewport.setPointerCapture(e.pointerId);
+});
+viewport.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  tx += e.clientX-lastX; ty += e.clientY-lastY;
+  lastX=e.clientX; lastY=e.clientY; render();
+});
+viewport.addEventListener('pointerup', () => dragging=false);
+
+let pinchStart=null;
+viewport.addEventListener('touchstart', e => {
+  if (e.touches.length===2) {
+    const a=e.touches[0], b=e.touches[1];
+    pinchStart={dist:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY), scale};
+  }
+},{passive:true});
+viewport.addEventListener('touchmove', e => {
+  if (e.touches.length===2 && pinchStart) {
+    const a=e.touches[0], b=e.touches[1];
+    const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    const factor=d/pinchStart.dist;
+    scale=Math.max(.2,Math.min(8,pinchStart.scale*factor));
+    render();
+  }
+},{passive:true});
+viewport.addEventListener('touchend', e => { if(e.touches.length<2) pinchStart=null; });
+
+window.addEventListener('resize', center);
+center();
+</script>
+</body>
+</html>
